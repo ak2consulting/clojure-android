@@ -19,6 +19,18 @@
 (defn method-sig [#^java.lang.reflect.Method meth]
   [(. meth (getName)) (seq (. meth (getParameterTypes))) (. meth getReturnType)])
 
+(defn- most-specific [rtypes]
+  (or (some (fn [t] (when (every? #(isa? t %) rtypes) t)) rtypes)
+    (throw (Exception. "Incompatible return types"))))
+
+(defn- group-by-sig [coll]
+ "takes a collection of [msig meth] and returns a seq of maps from return-types to meths."
+  (vals (reduce (fn [m [msig meth]]
+                  (let [rtype (peek msig)
+                        argsig (pop msig)]
+                    (assoc m argsig (assoc (m argsig {}) rtype meth))))
+          {} coll)))
+
 (defn proxy-name
  {:tag String} 
  [#^Class super interfaces]
@@ -44,6 +56,24 @@
         sym-type (totype clojure.lang.Symbol)
         rt-type  (totype clojure.lang.RT)
         ex-type  (totype java.lang.UnsupportedOperationException)
+        gen-bridge 
+        (fn [#^java.lang.reflect.Method meth #^java.lang.reflect.Method dest]
+            (let [pclasses (. meth (getParameterTypes))
+                  ptypes (to-types pclasses)
+                  rtype #^Type (totype (. meth (getReturnType)))
+                  m (new Method (. meth (getName)) rtype ptypes)
+                  dtype (totype (.getDeclaringClass dest))
+                  dm (new Method (. dest (getName)) (totype (. dest (getReturnType))) (to-types (. dest (getParameterTypes))))
+                  gen (new GeneratorAdapter (bit-or (. Opcodes ACC_PUBLIC) (. Opcodes ACC_BRIDGE)) m nil nil cv)]
+              (. gen (visitCode))
+              (. gen (loadThis))
+              (dotimes [i (count ptypes)]
+                  (. gen (loadArg i)))
+              (if (-> dest .getDeclaringClass .isInterface)
+                (. gen (invokeInterface dtype dm))
+                (. gen (invokeVirtual dtype dm)))
+              (. gen (returnValue))
+              (. gen (endMethod))))
         gen-method
         (fn [#^java.lang.reflect.Method meth else-gen]
             (let [pclasses (. meth (getParameterTypes))
@@ -55,38 +85,41 @@
                   end-label (. gen (newLabel))
                   decl-type (. Type (getType (. meth (getDeclaringClass))))]
               (. gen (visitCode))
-              (. gen (loadThis))
-              (. gen (getField ctype fmap imap-type))
-                                      
-              (. gen (push (. meth (getName))))
+              (if (> (count pclasses) 18)
+                (else-gen gen m)
+                (do
+                  (. gen (loadThis))
+                  (. gen (getField ctype fmap imap-type))
+                  
+                  (. gen (push (. meth (getName))))
                                         ;lookup fn in map
-              (. gen (invokeStatic rt-type (. Method (getMethod "Object get(Object, Object)"))))
-              (. gen (dup))
-              (. gen (ifNull else-label))
+                  (. gen (invokeStatic rt-type (. Method (getMethod "Object get(Object, Object)"))))
+                  (. gen (dup))
+                  (. gen (ifNull else-label))
                                         ;if found
-              (.checkCast gen ifn-type)
-              (. gen (loadThis))
+                  (.checkCast gen ifn-type)
+                  (. gen (loadThis))
                                         ;box args
-              (dotimes [i (count ptypes)]
-                  (. gen (loadArg i))
-                (. clojure.lang.Compiler$HostExpr (emitBoxReturn nil gen (nth pclasses i))))
+                  (dotimes [i (count ptypes)]
+                      (. gen (loadArg i))
+                    (. clojure.lang.Compiler$HostExpr (emitBoxReturn nil gen (nth pclasses i))))
                                         ;call fn
-              (. gen (invokeInterface ifn-type (new Method "invoke" obj-type 
-                                                    (into-array (cons obj-type 
-                                                                      (replicate (count ptypes) obj-type))))))
+                  (. gen (invokeInterface ifn-type (new Method "invoke" obj-type 
+                                                        (into-array (cons obj-type 
+                                                                          (replicate (count ptypes) obj-type))))))
                                         ;unbox return
-              (. gen (unbox rtype))
-              (when (= (. rtype (getSort)) (. Type VOID))
-                (. gen (pop)))
-              (. gen (goTo end-label))
-              
+                  (. gen (unbox rtype))
+                  (when (= (. rtype (getSort)) (. Type VOID))
+                    (. gen (pop)))
+                  (. gen (goTo end-label))
+                  
                                         ;else call supplied alternative generator
-              (. gen (mark else-label))
-              (. gen (pop))
-              
-              (else-gen gen m)
-              
-              (. gen (mark end-label))
+                  (. gen (mark else-label))
+                  (. gen (pop))
+                  
+                  (else-gen gen m)
+                  
+                  (. gen (mark end-label))))
               (. gen (returnValue))
               (. gen (endMethod))))]
     
@@ -169,9 +202,22 @@
                               (recur (assoc mm mk meth) (conj considered mk) (next meths))))
                           [mm considered]))]
                   (recur mm considered (. c (getSuperclass))))
-                [mm considered]))]
+                [mm considered]))
+          ifaces-meths (into {} 
+                         (for [#^Class iface interfaces meth (. iface (getMethods))
+                               :let [msig (method-sig meth)] :when (not (considered msig))]
+                           {msig meth}))
+          mgroups (group-by-sig (concat mm ifaces-meths))
+          rtypes (map #(most-specific (keys %)) mgroups)
+          mb (map #(vector (%1 %2) (vals (dissoc %1 %2))) mgroups rtypes)
+          bridge? (reduce into #{} (map second mb))
+          ifaces-meths (remove bridge? (vals ifaces-meths))
+          mm (remove bridge? (vals mm))]
                                         ;add methods matching supers', if no mapping -> call super
-      (doseq [#^java.lang.reflect.Method meth (vals mm)]
+      (doseq [[#^java.lang.reflect.Method dest bridges] mb
+              #^java.lang.reflect.Method meth bridges]
+          (gen-bridge meth dest))
+      (doseq [#^java.lang.reflect.Method meth mm]
           (gen-method meth 
                       (fn [#^GeneratorAdapter gen #^Method m]
                           (. gen (loadThis))
@@ -184,13 +230,10 @@
                                                 (. m (getDescriptor)))))))
       
                                         ;add methods matching interfaces', if no mapping -> throw
-      (doseq [#^Class iface interfaces]
-          (doseq [#^java.lang.reflect.Method meth (. iface (getMethods))]
-            (let [msig (method-sig meth)]
-              (when-not (or (contains? mm msig) (contains? considered msig))
+      (doseq [#^java.lang.reflect.Method meth ifaces-meths]
                 (gen-method meth 
                             (fn [#^GeneratorAdapter gen #^Method m]
-                                (. gen (throwException ex-type (. m (getName)))))))))))
+                                (. gen (throwException ex-type (. m (getName))))))))
     
                                         ;finish class def
     (. cv (visitEnd))
