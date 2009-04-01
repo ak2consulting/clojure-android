@@ -304,17 +304,15 @@ static public Field getField(Class c, String name, boolean getStatics){
 	return null;
 }
 
-static private java.util.Map<String,List> methodsCache = new java.util.HashMap<String,List>();
+static private java.util.Map<String,List> methodsCache = new java.util.concurrent.ConcurrentHashMap<String,List>();
 static public List getMethods(Class c, int arity, String name, boolean getStatics){
-    synchronized (methodsCache) {
-        String key = new StringBuilder(c.toString()).append(arity).append(name).append(getStatics).toString();
-        if (methodsCache.containsKey(key)) {
-            return methodsCache.get(key);
-        } else {
-            List methods = originalGetMethods(c, arity, name, getStatics);
-            methodsCache.put(key, methods);
-            return methods;
-        }
+    String key = new StringBuilder(c.toString()).append(arity).append(name).append(getStatics).toString();
+    if (methodsCache.containsKey(key)) {
+        return methodsCache.get(key);
+    } else {
+        List methods = originalGetMethods(c, arity, name, getStatics);
+        methodsCache.put(key, methods);
+        return methods;
     }
 }
 static public List originalGetMethods(Class c, int arity, String name, boolean getStatics){
