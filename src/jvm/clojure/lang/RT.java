@@ -178,6 +178,7 @@ final static public Var ERR =
 		           new PrintWriter(new OutputStreamWriter(System.err, UTF8), true));
 final static Keyword TAG_KEY = Keyword.intern(null, "tag");
 final static public Var AGENT = Var.intern(CLOJURE_NS, Symbol.create("*agent*"), null);
+final static public Var READEVAL = Var.intern(CLOJURE_NS, Symbol.create("*read-eval*"), T);
 final static public Var MACRO_META = Var.intern(CLOJURE_NS, Symbol.create("*macro-meta*"), null);
 final static public Var MATH_CONTEXT = Var.intern(CLOJURE_NS, Symbol.create("*math-context*"), null);
 static Keyword LINE_KEY = Keyword.intern(null, "line");
@@ -1490,14 +1491,15 @@ static public Class classForName(String name) throws ClassNotFoundException{
 }
 
 static public Class loadClassForName(String name) throws ClassNotFoundException{
-	try {
-		return Class.forName(name, true, baseLoader());
-	}
-	catch(ClassNotFoundException e) {
-		if(e.getCause() == null)
-			return null;
-		throw e;
-	}
+	try
+		{
+		Class.forName(name, false, baseLoader());
+		}
+	catch(ClassNotFoundException e)
+		{
+		return null;
+		}
+	return Class.forName(name, true, baseLoader());
 }
 
 static public float aget(float[] xs, int i){

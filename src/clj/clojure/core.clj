@@ -1064,7 +1064,7 @@
           default   (get options :default :default)
           hierarchy (get options :hierarchy #'global-hierarchy)]
       `(def ~(with-meta mm-name m)
-         (new clojure.lang.MultiFn ~dispatch-fn ~default ~hierarchy)))))
+         (new clojure.lang.MultiFn ~(name mm-name) ~dispatch-fn ~default ~hierarchy)))))
 
 (defmacro defmethod
   "Creates and installs a new method of multimethod associated with dispatch-value. "
@@ -1084,6 +1084,11 @@
 (defn methods
   "Given a multimethod, returns a map of dispatch values -> dispatch fns"
   [#^clojure.lang.MultiFn multifn] (.getMethodTable multifn))
+
+(defn get-method
+  "Given a multimethod and a dispatch value, returns the dispatch fn
+  that would apply to that value, or nil if none apply and no default"
+  [#^clojure.lang.MultiFn multifn dispatch-val] (.getMethod multifn dispatch-val))
 
 (defn prefers
   "Given a multimethod, returns a map of preferred value -> set of other values"
@@ -2339,22 +2344,6 @@
                 (clojure.lang.LineNumberingPushbackReader.))]
     (load-reader rdr)))
 
-(defn resultset-seq
-  "Creates and returns a lazy sequence of structmaps corresponding to
-  the rows in the java.sql.ResultSet rs"
-  [#^java.sql.ResultSet rs]
-    (let [rsmeta (. rs (getMetaData))
-          idxs (range 1 (inc (. rsmeta (getColumnCount))))
-          keys (map (comp keyword #(.toLowerCase #^String %))
-                    (map (fn [i] (. rsmeta (getColumnName i))) idxs))
-          row-struct (apply create-struct keys)
-          row-values (fn [] (map (fn [#^Integer i] (. rs (getObject i))) idxs))
-          rows (fn thisfn []
-                   (lazy-seq
-                    (when (. rs (next))
-                      (cons (apply struct row-struct (row-values)) (thisfn)))))]
-      (rows)))
-
 (defn set
   "Returns a set of the distinct elements of coll."
   [coll] (apply hash-set coll))
@@ -2887,7 +2876,7 @@
 
 (defn rand
   "Returns a random floating point number between 0 (inclusive) and
-  1 (exclusive)."
+  n (default 1) (exclusive)."
   ([] (. Math (random)))
   ([n] (* n (rand))))
 
@@ -3431,6 +3420,25 @@
            (recur (conj s x) etc))
          true))
      false)))
+
+(defn resultset-seq
+  "Creates and returns a lazy sequence of structmaps corresponding to
+  the rows in the java.sql.ResultSet rs"
+  [#^java.sql.ResultSet rs]
+    (let [rsmeta (. rs (getMetaData))
+          idxs (range 1 (inc (. rsmeta (getColumnCount))))
+          keys (map (comp keyword #(.toLowerCase #^String %))
+                    (map (fn [i] (. rsmeta (getColumnLabel i))) idxs))
+          check-keys
+                (or (apply distinct? keys)
+                    (throw (Exception. "ResultSet must have unique column labels")))
+          row-struct (apply create-struct keys)
+          row-values (fn [] (map (fn [#^Integer i] (. rs (getObject i))) idxs))
+          rows (fn thisfn []
+                   (lazy-seq
+                    (when (. rs (next))
+                      (cons (apply struct row-struct (row-values)) (thisfn)))))]
+      (rows)))
 
 (defn iterator-seq
   "Returns a seq on a java.util.Iterator. Note that most collections
@@ -4008,6 +4016,13 @@
 (add-doc *print-readably*
   "When set to logical false, strings and characters will be printed with
   non-alphanumeric characters converted to the appropriate escape sequences.
+
+  Defaults to true")
+
+(add-doc *read-eval*
+  "When set to logical false, the EvalReader (#=(...)) is disabled in the 
+  read/load in the thread-local binding.
+  Example: (binding [*read-eval* false] (read-string \"#=(eval (def x 3))\"))
 
   Defaults to true")
 
