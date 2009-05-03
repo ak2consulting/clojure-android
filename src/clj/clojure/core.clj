@@ -4087,19 +4087,23 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; clojure version number ;;;;;;;;;;;;;;;;;;;;;;
 
-(let [version-stream (.getResourceAsStream (clojure.lang.RT/baseLoader) 
-                                           "clojure/version.properties")
-      properties     (doto (new java.util.Properties) (.load version-stream))
-      prop (fn [k] (.getProperty properties (str "clojure.version." k)))
-      clojure-version {:major       (Integer/valueOf (prop "major"))
-                       :minor       (Integer/valueOf (prop "minor"))
-                       :incremental (Integer/valueOf (prop "incremental"))
-                       :qualifier   (prop "qualifier")}]
-  (def *clojure-version* 
-    (if (not (= (prop "interim") "false"))
-      (clojure.lang.RT/assoc clojure-version :interim true)
-      clojure-version)))
-      
+(try
+ (let [version-stream (.getResourceAsStream (clojure.lang.RT/baseLoader) 
+                                            "clojure/version.properties")
+       properties     (doto (new java.util.Properties) (.load version-stream))
+       prop (fn [k] (.getProperty properties (str "clojure.version." k)))
+       clojure-version {:major       (Integer/valueOf (prop "major"))
+                        :minor       (Integer/valueOf (prop "minor"))
+                        :incremental (Integer/valueOf (prop "incremental"))
+                        :qualifier   (prop "qualifier")}]
+   (def *clojure-version* 
+        (if (not (= (prop "interim") "false"))
+          (clojure.lang.RT/assoc clojure-version :interim true)
+          clojure-version)))
+
+ (catch Throwable _
+   (def *clojure-version* {:major 1, :minor 0, :incremental 0, :qualifier "PROBABLY"})))
+
 (add-doc *clojure-version*
   "The version info for Clojure core, as a map containing :major :minor 
   :incremental and :qualifier keys. Feature releases may increment 
