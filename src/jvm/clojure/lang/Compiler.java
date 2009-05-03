@@ -37,7 +37,7 @@ public class Compiler implements Opcodes{
 static final Symbol DEF = Symbol.create("def");
 static final Symbol LOOP = Symbol.create("loop*");
 static final Symbol RECUR = Symbol.create("recur");
-static final Symbol IF = Symbol.create("if*");
+static final Symbol IF = Symbol.create("if");
 static final Symbol LET = Symbol.create("let*");
 static final Symbol LETFN = Symbol.create("letfn*");
 static final Symbol DO = Symbol.create("do");
@@ -180,7 +180,7 @@ static final public Var SOURCE = Var.intern(Namespace.findOrCreate(Symbol.create
 
 //String
 static final public Var SOURCE_PATH = Var.intern(Namespace.findOrCreate(Symbol.create("clojure.core")),
-                                                 Symbol.create("*file*"), null);
+                                                 Symbol.create("*file*"), "NO_SOURCE_PATH");
 
 //String
 static final public Var COMPILE_PATH = Var.intern(Namespace.findOrCreate(Symbol.create("clojure.core")),
@@ -866,8 +866,8 @@ static class InstanceFieldExpr extends FieldExpr implements AssignableExpr{
 		if(field == null && RT.booleanCast(RT.WARN_ON_REFLECTION.deref()))
 			{
 			((PrintWriter) RT.ERR.deref())
-					.format("Reflection warning, line: %d - reference to field %s can't be resolved.\n", line,
-					        fieldName);
+					.format("Reflection warning, %s:%d - reference to field %s can't be resolved.\n",
+							SOURCE_PATH.deref(), line, fieldName);
 			}
 	}
 
@@ -1129,7 +1129,8 @@ static class InstanceMethodExpr extends MethodExpr{
 		if(method == null && RT.booleanCast(RT.WARN_ON_REFLECTION.deref()))
 			{
 			((PrintWriter) RT.ERR.deref())
-					.format("Reflection warning, line: %d - call to %s can't be resolved.\n", line, methodName);
+					.format("Reflection warning, %s:%d - call to %s can't be resolved.\n",
+							SOURCE_PATH.deref(), line, methodName);
 			}
 	}
 
@@ -1270,7 +1271,8 @@ static class StaticMethodExpr extends MethodExpr{
 		if(method == null && RT.booleanCast(RT.WARN_ON_REFLECTION.deref()))
 			{
 			((PrintWriter) RT.ERR.deref())
-					.format("Reflection warning, line: %d - call to %s can't be resolved.\n", line, methodName);
+					.format("Reflection warning, %s:%d - call to %s can't be resolved.\n",
+							SOURCE_PATH.deref(), line, methodName);
 			}
 	}
 
@@ -2114,7 +2116,8 @@ public static class NewExpr implements Expr{
 		if(ctor == null && RT.booleanCast(RT.WARN_ON_REFLECTION.deref()))
 			{
 			((PrintWriter) RT.ERR.deref())
-					.format("Reflection warning, line: %d - call to %s ctor can't be resolved.\n", line, c.getName());
+					.format("Reflection warning, %s:%d - call to %s ctor can't be resolved.\n",
+							SOURCE_PATH.deref(), line, c.getName());
 			}
 	}
 
@@ -4591,6 +4594,7 @@ private static Expr analyzeSymbol(Symbol sym) throws Exception{
 				{
 				if(Reflector.getField(c, sym.name, true) != null)
 					return new StaticFieldExpr((Integer) LINE.deref(), c, sym.name);
+				throw new Exception("Unable to find static field: " + sym.name + " in " + c);
 				}
 			}
 		}

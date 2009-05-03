@@ -37,10 +37,6 @@
  fn (fn* fn [& decl] (cons 'fn* decl)))
 
 (def
- #^{:macro true}
- if (fn* if [& decl] (cons 'if* decl)))
-
-(def
  #^{:arglists '([coll])
     :doc "Returns the first item in the collection. Calls seq on its
     argument. If coll is nil, returns nil."}
@@ -293,20 +289,6 @@
 
 (. (var defmacro) (setMacro))
 
-(defmacro assert-if-lazy-seq? {:private true} []
-  (let [prop (System/getProperty "clojure.assert-if-lazy-seq")]
-    (if prop
-      (if (clojure.lang.Util/equals prop "") nil true))))
-
-(defmacro if [tst & etc]
-  (if* (assert-if-lazy-seq?)
-    (let [tstsym 'G__0_0]
-      (list 'clojure.core/let [tstsym tst]
-	(list 'if* (list 'clojure.core/instance? clojure.lang.LazySeq tstsym)
-           (list 'throw (list 'new Exception "LazySeq used in 'if'"))
-	   (cons 'if* (cons tstsym etc)))))
-    (cons 'if* (cons tst etc))))
-
 (defmacro when
   "Evaluates test. If logical true, evaluates body in an implicit do."
   [test & body]
@@ -422,8 +404,7 @@
   "Takes a body of expressions that returns an ISeq or nil, and yields
   a Seqable object that will invoke the body only the first time seq
   is called, and will cache the result and return it on all subsequent
-  seq calls. Any closed over locals will be cleared prior to the tail
-  call of body."  
+  seq calls."  
   [& body]
   (list 'new 'clojure.lang.LazySeq (list* '#^{:once true} fn* [] body)))    
 
@@ -454,8 +435,7 @@
   "Takes a body of expressions and yields a Delay object that will
   invoke the body only the first time it is forced (with force), and
   will cache the result and return it on all subsequent force
-  calls. Any closed over locals will be cleared prior to the tail call
-  of body, (i.e. they will not be retained)."  
+  calls."  
   [& body]
     (list 'new 'clojure.lang.Delay (list* `#^{:once true} fn* [] body)))
 
@@ -1464,14 +1444,19 @@
    (fn [& args] (apply f arg1 arg2 arg3 (concat more args)))))
 
 ;;;;;;;;;;;;;;;;;;; sequence fns  ;;;;;;;;;;;;;;;;;;;;;;;
+(defn stream? 
+  "Returns true if x is an instance of Stream"
+  [x] (instance? clojure.lang.Stream x))
+
 
 (defn sequence
   "Coerces coll to a (possibly empty) sequence, if it is not already
   one. Will not force a lazy seq. (sequence nil) yields ()"  
   [coll]
-   (if (seq? coll)
-     coll
-     (or (seq coll) ())))
+   (cond 
+    (seq? coll) coll
+    (stream? coll) (.sequence #^clojure.lang.Stream coll)
+    :else (or (seq coll) ())))
 
 (defn every?
   "Returns true if (pred x) is logical true for every x in coll, else
@@ -3447,7 +3432,7 @@
   (clojure.lang.IteratorSeq/create iter))
 
 (defn enumeration-seq
-  "Returns a seq on a java.lang.Enumeration"
+  "Returns a seq on a java.util.Enumeration"
   [e]
   (clojure.lang.EnumerationSeq/create e))
 
@@ -3935,7 +3920,7 @@
                        (split-at (if (= :>> (second args)) 3 2) args)
                        n (count clause)]
                  (cond
-                  (= 0 n) `(throw (IllegalArgumentException. "No matching clause"))
+                  (= 0 n) `(throw (IllegalArgumentException. (str "No matching clause: " ~expr)))
                   (= 1 n) a
                   (= 2 n) `(if (~pred ~a ~expr)
                              ~b
@@ -4032,7 +4017,6 @@
 (load "core_print")
 (load "genclass")
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; futures (needs proxy);;;;;;;;;;;;;;;;;;
 (defn future-call 
   "Takes a function of no args and yields a future object that will
@@ -4100,3 +4084,38 @@
   `(letfn* ~(vec (interleave (map first fnspecs) 
                              (map #(cons `fn %) fnspecs)))
            ~@body))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; clojure version number ;;;;;;;;;;;;;;;;;;;;;;
+
+(let [version-stream (.getResourceAsStream (clojure.lang.RT/baseLoader) 
+                                           "clojure/version.properties")
+      properties     (doto (new java.util.Properties) (.load version-stream))
+      prop (fn [k] (.getProperty properties (str "clojure.version." k)))
+      clojure-version {:major       (Integer/valueOf (prop "major"))
+                       :minor       (Integer/valueOf (prop "minor"))
+                       :incremental (Integer/valueOf (prop "incremental"))
+                       :qualifier   (prop "qualifier")}]
+  (def *clojure-version* 
+    (if (not (= (prop "interim") "false"))
+      (clojure.lang.RT/assoc clojure-version :interim true)
+      clojure-version)))
+      
+(add-doc *clojure-version*
+  "The version info for Clojure core, as a map containing :major :minor 
+  :incremental and :qualifier keys. Feature releases may increment 
+  :minor and/or :major, bugfix releases will increment :incremental. 
+  Possible values of :qualifier include \"GA\", \"SNAPSHOT\", \"RC-x\" \"BETA-x\"")
+      
+(defn
+  clojure-version 
+  "Returns clojure version as a printable string."
+  []
+  (str (:major *clojure-version*)
+       "."
+       (:minor *clojure-version*)
+       (when-let [i (:incremental *clojure-version*)]
+         (str "." i))
+       (when-let [q (:qualifier *clojure-version*)]
+         (str "-" q))
+       (when (:interim *clojure-version*)
+         "-SNAPSHOT")))
